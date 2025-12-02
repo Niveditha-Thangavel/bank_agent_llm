@@ -1,0 +1,30 @@
+{
+  "bank_statements": [
+    {
+      "customer_id": "C101",
+      "transactions": [
+        {"date": "2025-11-01", "amount": 5000, "type": "credit", "description": "Salary"},
+        {"date": "2025-11-02", "amount": 600, "type": "debit", "description": "Grocery"},
+        {"date": "2025-11-03", "amount": 1200, "type": "debit", "description": "Electronics"},
+        {"date": "2025-11-05", "amount": 300, "type": "debit", "description": "Transport"},
+        {"date": "2025-11-08", "amount": 850, "type": "debit", "description": "Shopping"},
+        {"date": "2025-11-10", "amount": 1000, "type": "credit", "description": "Freelance Income"},
+        {"date": "2025-11-12", "amount": 400, "type": "debit", "description": "Dining"},
+        {"date": "2025-11-15", "amount": 700, "type": "debit", "description": "Utilities"}
+      ]
+    },
+    {
+      "customer_id": "C102",
+      "transactions": [
+        {"date": "2025-11-01", "amount": 28000, "type": "credit", "description": "Salary"},
+        {"date": "2025-11-02", "amount": 1500, "type": "debit", "description": "Grocery"},
+        {"date": "2025-11-03", "amount": 200, "type": "debit", "description": "Coffee"},
+        {"date": "2025-11-04", "amount": 500, "type": "debit", "description": "Transport"},
+        {"date": "2025-11-06", "amount": 1000, "type": "debit", "description": "Electronics"},
+        {"date": "2025-11-08", "amount": 2500, "type": "debit", "description": "Shopping"},
+        {"date": "2025-11-10", "amount": 10000, "type": "credit", "description": "Project Bonus"},
+        {"date": "2025-11-12", "amount": 300, "type": "debit", "description": "Dining"}
+      ]
+    }
+  ]
+}

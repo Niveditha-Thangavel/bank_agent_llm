@@ -5,22 +5,15 @@ import os
 
 
 os.environ["OPENAI_API_KEY"] = "your_openai_api_key_here" 
-ollm = LLM(
-    model="ollama/phi3",
-    base_url="http://localhost:11434"
-
-)
-
-
-
-
+API_KEY = "AIzaSyCG3JZiOqvWYmLrGHC9RoSbdnN4OkJVUgo"
+ollm = LLM(model='gemini/gemini-2.5-flash', api_key=API_KEY)
 
 
 class fetch_tool(BaseTool):
     name:str = "Data fetcher"
     description:str = "Fetches the right customer account data, from database(json file)"
     def _run(self,customer_id:str):
-        with open ("bank_statement.json","r") as f:
+        with open ("bank_statements.json","r") as f:
             statement = json.load(f)
 
         with open ("credits_loan.json","r") as f1:
@@ -57,175 +50,189 @@ def create_agents(customer_id):
         allow_delegation = True,
         verbose = True,
         llm = ollm
-        
 
-    )
-
-    calculator_agent = Agent(
-        role="Calculator Agent",
-        goal="Transform raw financial records into structured metrics like "
-             "average monthly income, average monthly spend, transaction patterns, etc., "
-             "and forward them to the approval agent.",
-        backstory="You are a fast, precise calculator who converts raw statements "
-                  "into credit-scoring parameters.",
-        allow_delegation = True,
-        verbose = True,
-        llm = ollm
     )
 
     approval_agent = Agent(
-        role="Approval Agent",
-        goal="Apply scoring rules on the calculator output, normalize the score between 0 and 10, "
-             "and return loan approval status with reasons.",
-        backstory=f"You are the loan manager who uses the generated metrics to decide whether "
-                  f"customer {customer_id} should be approved.",
-        llm = ollm
-    )
-    
-    return input_agent, calculator_agent, approval_agent
+            role="Loan Decision Agent",
+            goal=(
+                "1) Transform raw financial records into structured metrics "
+                "(e.g., average monthly income, average monthly spend, income volatility, "
+                "recurring payments, transaction patterns like freq of credits/debits, "
+                "large outliers). "
+                "2) Apply scoring rules on those metrics, normalize the score between 0 and 10, "
+                "and return loan approval status with concise, actionable reasons."
+            ),
+            backstory=(
+                "You are both a fast, precise calculator and the loan manager: convert raw bank/transaction "
+                "statements into scoring metrics and then apply lending rules to produce a normalized "
+                "credit score (0-10) and an approval decision with reasons. If any metric is unclear, "
+                "state assumptions explicitly."
+            ),
+            verbose=True,
+            allow_delegation= False,
+            llm=ollm
+        )
+            
+    return input_agent,approval_agent
 
 def create_task(customer_id):
-    input_agent, calculator_agent, approval_agent = create_agents(customer_id)
+    input_agent,approval_agent = create_agents(customer_id)
     input_agent_task = Task(
         description=f"Fetch bank statements, credit card details, and loan data for customer {customer_id}.",
         expected_output="A JSON object containing all financial data for the customer.",
         agent=input_agent
     )
 
-    calculator_agent_task = Task(
-        description="""Process the input data and compute metrics strictly following the exact formula
-                        ## 1. Income & Spend Metrics
-•⁠  ⁠Count all transactions:
-    - credit → contributes to monthly income
-    - debit → contributes to monthly spend
-•⁠  ⁠Calculate:
-    - avg_monthly_income = total_credit_amount / number_of_credit_transactions
-    - avg_monthly_spend = total_debit_amount / number_of_debit_transactions
-    - total_transaction_amount = income + spend
-    - avg_transaction_amount = total_transaction_amount / total_transactions
-    - spend_ratio = (avg_monthly_spend / avg_monthly_income)  100
-
----
-
-## 2. Spending Variance & Anomaly Detection
-•⁠  ⁠Compute variance of transaction amounts:
-    - variance = average of (avg_transaction_amount – transaction_amount)²
-    - standard_deviation = sqrt(variance)
-•⁠  ⁠anomaly_flags = number of transactions where amount > standard_deviation
-
----
-
-## 3. Credit Card Late Payments (from credits_loan.json)
-For each customer:
-•⁠  ⁠Count ⁠late_payment_count by checking each billing cycle:
-    - If payment_date > cycle_end OR amount_paid < amount_due → late payment
-
----
-
-## 4. Current Active Loans
-•⁠  ⁠current_loans = number of loans where outstanding_amount > 0
-
----
-
-## 5. Credit Utilization Ratio
-For each credit card:
-    utilization_percent = (current_balance / credit_limit) × 100
-•⁠  ⁠credit_utilization_ratio = average of all utilization values
-
----
-
-## 6. Account Age
-•⁠  ⁠account_age_months = difference between today and account_creation_date in months
-
----
-
-
-        """,
-        expected_output= """Return exact json 
-         {
-            "metrics": {
-            "avg_month_income": 0.0,
-            "avg_month_spend": 0.0,
-            "late_payment_count": 0,
-            "credit_utilization_ratio": 0.0,
-            "account_age_months": 0,
-            "anomaly_flags": 0,
-            "transaction_pattern": {
-                "incoming_to_outgoing_ratio": 0.0,
-                "anomaly_flags": 0
-            }
-            },
-            "metrics_notes": [
-            "optional list of parsing/assumption notes"
-            ]
-            } """,
-        agent=calculator_agent,
-        context = [input_agent_task]
-    )
-
     approval_agent_task = Task(
-        description="""Take the computed parameters and apply these decision rules to Provide approval or rejection with explanation
-        
-        
-                REJECT if ANY:
-        - late_payment_count > 3
-        - credit_utilization_ratio > 70
-        - anomaly_flags > 0
-        - avg_month_income < avg_month_spend
-        - account_age_months < 3
-        - transaction_pattern.anomaly_flags > 0
+    description="""
+Process the input payload and compute metrics using the exact formulas specified below, then make an approval decision.
+MANDATES:
+- Fill "customer_id" from the input payload (look for input["customer_id"] or input["profile"]["customer_id"]).
+- Return ONLY the exact JSON schema described in expected_output (no extra keys, no comments, no explanatory text).
+- Use system date for account_age_months calculation.
+- All numeric fields must be numbers; counts must be integers. Use math.inf for infinite ratios where required.
 
-        APPROVE if ALL:
-        - income_spend_ratio >= 1.5
-        - late_payment_count <= 1
-        - credit_utilization_ratio <= 40
-        - account_age_months >= 12
-        - anomaly_flags == 0
-        - transaction_pattern.incoming_to_outgoing_ratio >= 1.2  (treat inf as > 1.2)
+METRICS (exact formulas)
+1) Income & Spend Metrics
+- total_credit_amount = sum(amount for transaction in transactions if transaction["type"] == "credit")
+- number_of_credit_transactions = count of such credit transactions (integer)
+- total_debit_amount = sum(amount for transaction in transactions if transaction["type"] == "debit")
+- number_of_debit_transactions = count of such debit transactions (integer)
+- total_transactions = number_of_credit_transactions + number_of_debit_transactions
+- avg_monthly_income = total_credit_amount / number_of_credit_transactions   (if number_of_credit_transactions == 0 -> 0.0)
+- avg_monthly_spend  = total_debit_amount / number_of_debit_transactions    (if number_of_debit_transactions == 0 -> 0.0)
+- total_transaction_amount = total_credit_amount + total_debit_amount
+- avg_transaction_amount = total_transaction_amount / total_transactions   (if total_transactions == 0 -> 0.0)
+- spend_ratio = (avg_monthly_spend / avg_monthly_income) * 100            (if avg_monthly_income == 0 -> set spend_ratio = math.inf)
 
-        REVIEW if ALL:
-        - 1.1 <= income_spend_ratio < 1.5
-        - late_payment_count <= 2
-        - credit_utilization_ratio <= 60
-        - anomaly_flags == 0
+2) Variance & Anomaly
+- variance = mean((avg_transaction_amount - t_amount)**2 for each transaction)
+  (if no transactions -> 0.0)
+- standard_deviation = sqrt(variance)
+- anomaly_flags = count of transactions where transaction_amount > standard_deviation
 
-        
-        
-        """,
-        expected_output= """ Return EXACT JSON:
+3) Late payments (credits_loan.json)
+- late_payment_count = count of billing cycles where (payment_date > cycle_end) OR (amount_paid < amount_due)
+  (if credits_loan data absent -> 0)
+
+4) Current active loans
+- current_loans = count of loans where outstanding_amount > 0  (if loan list absent -> 0)
+
+5) Credit utilization ratio
+- For each card in credit_cards:
+    utilization_percent = (current_balance / credit_limit) * 100  (if credit_limit == 0 -> treat utilization_percent = 100)
+- credit_utilization_ratio = average(utilization_percent values) (if no cards -> 0.0)
+
+6) Account age
+- account_age_months = whole months between today and account_creation_date (round down). If account_creation_date missing -> 0
+
+7) Transaction pattern
+- incoming_to_outgoing_ratio = total_credit_amount / total_debit_amount
+    (if total_debit_amount == 0 and total_credit_amount > 0 -> math.inf;
+     if both zero -> 0.0)
+- transaction_pattern.anomaly_flags = anomaly_flags
+
+DECISION RULES (apply after metrics)
+- income_spend_ratio = avg_monthly_income / (avg_monthly_spend or 1e-9)   (use 1e-9 to avoid div-by-zero)
+- REJECT if ANY:
+    late_payment_count > 3
+    credit_utilization_ratio > 70
+    anomaly_flags > 0
+    avg_month_income < avg_month_spend
+    account_age_months < 3
+    transaction_pattern.anomaly_flags > 0
+- APPROVE if ALL:
+    income_spend_ratio >= 1.5
+    late_payment_count <= 1
+    credit_utilization_ratio <= 40
+    account_age_months >= 12
+    anomaly_flags == 0
+    transaction_pattern.incoming_to_outgoing_ratio >= 1.2   (treat inf as >1.2)
+- REVIEW if ALL:
+    1.1 <= income_spend_ratio < 1.5
+    late_payment_count <= 2
+    credit_utilization_ratio <= 60
+    anomaly_flags == 0
+- If none of the above match exactly, pick the most conservative decision among applicable states (REJECT > REVIEW > APPROVE). Provide failing checks in reason.
+
+OUTPUT (EXACT JSON - no extra keys)
 {
-  "customer_id": "...",
+  "customer_id": string,
+  "decision": "APPROVE" | "REJECT" | "REVIEW",
+  "reason": string,
+  "income_spend_ratio": number,
+  "metrics": {
+    "avg_month_income": number,
+    "avg_month_spend": number,
+    "total_transaction_amount": number,
+    "avg_transaction_amount": number,
+    "spend_ratio": number,
+    "variance": number,
+    "standard_deviation": number,
+    "anomaly_flags": integer,
+    "late_payment_count": integer,
+    "current_loans": integer,
+    "credit_utilization_ratio": number,
+    "account_age_months": integer,
+    "transaction_pattern": {
+      "incoming_to_outgoing_ratio": number,
+      "anomaly_flags": integer
+    }
+  },
+  "metrics_notes": [ "strings describing parsing assumptions or missing fields" ]
+}
+
+Use input payload fields: transactions, credits_loan (if present), loans (if present), credit_cards (if present), account_creation_date, customer_id.
+""",
+    expected_output="""
+Return EXACT JSON (no extra keys). Example structure:
+
+{
+  "customer_id": " ",
   "decision": "APPROVE" | "REJECT" | "REVIEW",
   "reason": "human readable explanation for the decision (include failing checks)",
   "income_spend_ratio": number,
   "metrics": {
     "avg_month_income": number,
     "avg_month_spend": number,
+    "total_transaction_amount": number,
+    "avg_transaction_amount": number,
+    "spend_ratio": number,
+    "variance": number,
+    "standard_deviation": number,
+    "anomaly_flags": integer,
     "late_payment_count": integer,
+    "current_loans": integer,
     "credit_utilization_ratio": number,
     "account_age_months": integer,
-    "anomaly_flags": integer,
     "transaction_pattern": {
       "incoming_to_outgoing_ratio": number,
       "anomaly_flags": integer
     }
-  },""" ,
-        agent=approval_agent,
-        context = [calculator_agent_task]
-    )
+  },
+  "metrics_notes": [
+    "optional list of parsing/assumption notes (strings)"
+  ]
+}
+""",
+    agent=approval_agent,
+    context=[input_agent_task] 
+)
 
-    return input_agent_task, calculator_agent_task, approval_agent_task
+
+    return input_agent_task, approval_agent_task
 
 
 
 customer_id = input("Enter the customer id: ")
-input_agent, calculator_agent, approval_agent = create_agents(customer_id)
-input_agent_task, calculator_agent_task, approval_agent_task = create_task(customer_id)
+input_agent, approval_agent = create_agents(customer_id)
+input_agent_task, approval_agent_task = create_task(customer_id)
 
 
 crew = Crew(
-    agents=[input_agent, calculator_agent, approval_agent],
-    tasks=[input_agent_task, calculator_agent_task, approval_agent_task],
+    agents=[input_agent,approval_agent],
+    tasks=[input_agent_task, approval_agent_task],
     verbose=True
 )
 

@@ -1,5 +1,5 @@
 import streamlit as st
-from agent import main
+from multi_agent import main
 
 
 st.title("Welcome!")

@@ -3,8 +3,7 @@ from crewai.tools import BaseTool
 import json
 import os
 import re
-from typing import Callable, Any
-
+from typing import Any
 
 os.environ["OPENAI_API_KEY"] = "your_openai_api_key_here" 
 #API_KEY = "AIzaSyCG3JZiOqvWYmLrGHC9RoSbdnN4OkJVUgo"
@@ -192,7 +191,7 @@ Use input payload fields: transactions, credits_loan (if present), loans (if pre
 Return EXACT JSON (no extra keys). Example structure:
 
 {
-  "customer_id": " ",
+  "customer_id": "{customer_id} ",
   "decision": "APPROVE" | "REJECT" | "REVIEW",
   "reason": "human readable explanation for the decision (include failing checks)",
   "income_spend_ratio": number,

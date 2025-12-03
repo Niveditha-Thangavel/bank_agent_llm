@@ -2,10 +2,13 @@ from crewai import Agent, Task, Crew,LLM
 from crewai.tools import BaseTool
 import json
 import os
+import re
+from typing import Callable, Any
 
 
 os.environ["OPENAI_API_KEY"] = "your_openai_api_key_here" 
-API_KEY = "AIzaSyCG3JZiOqvWYmLrGHC9RoSbdnN4OkJVUgo"
+#API_KEY = "AIzaSyCG3JZiOqvWYmLrGHC9RoSbdnN4OkJVUgo"
+API_KEY = "AIzaSyD0UGwiFALa_h-b20cIpWoErnd02oq2weI"
 ollm = LLM(model='gemini/gemini-2.5-flash', api_key=API_KEY)
 
 
@@ -223,17 +226,34 @@ Return EXACT JSON (no extra keys). Example structure:
 
     return input_agent_task, approval_agent_task
 
+def handle_prompt(prompt: str) -> Any:
+    prompt = prompt or ""
+    valid = re.search(r"\b[Cc]\d{3}\b", prompt)
+    if valid:
+        return valid.group(0).upper()
+    near = re.search(r"\b[A-Za-z]\d+\b", prompt)
+    if near:
+        return "INVALID"
+    return None
+
+user_prompt = input("Hi! How can I help you? \n") 
+
+result = handle_prompt(user_prompt)
+
+if result is None:
+    print("Customer ID missing — please provide your ID (e.g., C101).")
+elif result == "INVALID":
+    print("Invalid customer ID. Please provide an ID in the format C101 (C + 3 digits).")
+else:
+    customer_id = result
+    input_agent, approval_agent = create_agents(customer_id)
+    input_agent_task, approval_agent_task = create_task(customer_id)
 
 
-customer_id = input("Enter the customer id: ")
-input_agent, approval_agent = create_agents(customer_id)
-input_agent_task, approval_agent_task = create_task(customer_id)
+    crew = Crew(
+        agents=[input_agent,approval_agent],
+        tasks=[input_agent_task, approval_agent_task],
+        verbose=True
+    )
 
-
-crew = Crew(
-    agents=[input_agent,approval_agent],
-    tasks=[input_agent_task, approval_agent_task],
-    verbose=True
-)
-
-crew.kickoff()
+    crew.kickoff()
